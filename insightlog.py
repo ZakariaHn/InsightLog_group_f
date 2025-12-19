@@ -133,25 +133,30 @@ def check_match(line, filter_pattern, is_regex=False, is_casesensitive=True, is_
 
 
 def filter_data(log_filter, data=None, filepath=None, is_casesensitive=True, is_regex=False, is_reverse=False):
-    """Filter received data/file content and return the results"""
-    return_data = ""
-    if filepath:
-        try:
-            with open(filepath, 'r') as file_object:
-                for line in file_object:
-                    if check_match(line, log_filter, is_regex, is_casesensitive, is_reverse):
-                        return_data += line
-            return return_data
-        except (IOError, EnvironmentError) as e:
-            print(e.strerror)
-            return None
-    elif data:
-        for line in data.splitlines():
-            if check_match(line, log_filter, is_regex, is_casesensitive, is_reverse):
-                return_data += line+"\n"
-        return return_data
-    else:
-        raise Exception("Data and filepath values are NULL!")
+    """Filter received data/file content and return the results.
+
+    If filepath is provided, any file I/O errors are allowed to raise naturally
+    (FileNotFoundError, PermissionError, etc.) for consistent error handling.
+    """
+    if filepath is None and data is None:
+        raise ValueError("Either data or filepath must be provided")
+
+    return_lines = []
+
+    if filepath is not None:
+        # Let Python raise on any I/O issue (missing file, perms, etc.)
+        with open(filepath, "r") as f:
+            for line in f:
+                if check_match(line, log_filter, is_regex, is_casesensitive, is_reverse):
+                    return_lines.append(line)
+        return "".join(return_lines)
+
+    # data path (keep empty string as valid input)
+    for line in str(data).splitlines():
+        if check_match(line, log_filter, is_regex, is_casesensitive, is_reverse):
+            return_lines.append(line + "\n")
+    return "".join(return_lines)
+
 
 
 def _get_iso_datetime(str_date, pattern, keys):
@@ -296,14 +301,22 @@ def get_requests(service, data=None, filepath=None, filters=None):
 
 
 # CLI entry point
+
+# This runs only when this file is executed directly.
+# It won’t run if the file is imported as a module from another Python file.
+
+# [argparse] is the standard library tool for reading command-line arguments like --service nginx.
 if __name__ == '__main__':
     import argparse
     
+    # This: 
+    #   - Creates a parser with a help/description message
+    #   - Then it defines three arguments: (--service), (--logfile) and (--logfile)
     parser = argparse.ArgumentParser(description="Analyze server log files (nginx, apache2, auth)")
     parser.add_argument('--service', required=True, choices=['nginx', 'apache2', 'auth'], help='Type of log to analyze')
     parser.add_argument('--logfile', required=True, help='Path to the log file')
     parser.add_argument('--filter', required=False, default=None, help='String to filter log lines')
-    args = parser.parse_args()
+    args = parser.parse_args() # Reads the actual command line and fills args.service, args.logfile, args.filter.
 
     filters = []
     if args.filter:
@@ -313,4 +326,11 @@ if __name__ == '__main__':
     if requests:
         for req in requests:
             print(req)
+
+        # --- Repro bug #1 ---
+    print("\n[BUG1 REPRO] calling filter_data() with a missing file...")
+    missing_path = "/definitely/not/a/real/file.log"
+    out = filter_data("anything", filepath=missing_path)
+    print("[BUG1 REPRO] filter_data returned:", out, "type:", type(out))
+    # --- end repro ---
 
